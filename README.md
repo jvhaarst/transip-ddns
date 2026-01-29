@@ -118,7 +118,15 @@ recordtypes:
 
 ## Docker
 
-### Building the Image
+### Pre-built Images
+
+Multi-arch images (amd64, arm64) are available from GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/jvhaarst/transip-ddns:main
+```
+
+### Building the Image Locally
 
 ```bash
 docker build -t transip-ddns .
@@ -221,8 +229,8 @@ Create a `my-values.yaml`:
 
 ```yaml
 image:
-  repository: ghcr.io/your-username/transip-ddns
-  tag: latest
+  repository: ghcr.io/jvhaarst/transip-ddns
+  tag: main
 
 schedule: "*/5 * * * *"
 
