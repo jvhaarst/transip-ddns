@@ -318,8 +318,36 @@ lookup_ipv6() {
     return 1
 }
 
+# Variable to cache DNS records for current domain
+CACHED_DNS_DOMAIN=""
+CACHED_DNS_RECORDS=""
+
 #######################################
-# Get current DNS record value using tipctl
+# Fetch all DNS records for a domain (single API call)
+# Arguments:
+#   $1 - Domain
+# Sets:
+#   CACHED_DNS_DOMAIN - The domain that was fetched
+#   CACHED_DNS_RECORDS - All DNS records for the domain
+#######################################
+fetch_domain_dns() {
+    local domain="$1"
+
+    log "DEBUG" "Fetching DNS records for $domain"
+    CACHED_DNS_DOMAIN="$domain"
+    CACHED_DNS_RECORDS=$(tipctl domain:dns:getall "$domain" 2>/dev/null) || CACHED_DNS_RECORDS=""
+
+    if [[ -z "$CACHED_DNS_RECORDS" ]]; then
+        log "WARN" "No DNS records found for $domain (or failed to fetch)"
+    else
+        local record_count
+        record_count=$(echo "$CACHED_DNS_RECORDS" | wc -l | tr -d ' ')
+        log "DEBUG" "Fetched $record_count DNS records for $domain"
+    fi
+}
+
+#######################################
+# Get current DNS record value from cached data
 # Arguments:
 #   $1 - Domain
 #   $2 - Subdomain (use @ for root)
@@ -338,9 +366,14 @@ get_dns_record() {
         lookup_subdomain="@"
     fi
 
-    # Get DNS entries and filter for the specific record
+    # Ensure we have cached data for this domain
+    if [[ "$CACHED_DNS_DOMAIN" != "$domain" ]]; then
+        fetch_domain_dns "$domain"
+    fi
+
+    # Filter cached records for the specific subdomain and type
     local result
-    result=$(tipctl domain:dns:getall "$domain" 2>/dev/null | grep -E "^${lookup_subdomain}\s+${TTL}\s+${record_type}\s+" | awk '{print $4}') || true
+    result=$(echo "$CACHED_DNS_RECORDS" | grep -E "^${lookup_subdomain}\s+[0-9]+\s+${record_type}\s+" | awk '{print $4}') || true
 
     echo "$result"
 }
@@ -352,12 +385,14 @@ get_dns_record() {
 #   $2 - Subdomain
 #   $3 - Record type
 #   $4 - New value
+#   $5 - Old value (optional, for display)
 #######################################
 update_dns_record() {
     local domain="$1"
     local subdomain="$2"
     local record_type="$3"
     local new_value="$4"
+    local old_value="${5:-}"
 
     # Normalize subdomain for tipctl
     local tipctl_subdomain="$subdomain"
@@ -365,7 +400,13 @@ update_dns_record() {
         tipctl_subdomain="@"
     fi
 
-    local change_desc="${subdomain}.${domain} ${record_type} -> ${new_value}"
+    # Build change description with old -> new transition
+    local change_desc
+    if [[ -n "$old_value" ]]; then
+        change_desc="${subdomain}.${domain} ${record_type}: ${old_value} -> ${new_value}"
+    else
+        change_desc="${subdomain}.${domain} ${record_type}: (new) -> ${new_value}"
+    fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
         log "INFO" "[DRY-RUN] Would update: $change_desc"
@@ -393,6 +434,9 @@ process_domain() {
     local domain="$1"
 
     log "INFO" "Processing domain: $domain"
+
+    # Fetch all DNS records for this domain once (optimization)
+    fetch_domain_dns "$domain"
 
     for subdomain in "${SUBDOMAINS[@]}"; do
         log "DEBUG" "Processing subdomain: $subdomain"
@@ -423,17 +467,17 @@ process_domain() {
                     ;;
             esac
 
-            # Get current record
+            # Get current record from cached data
             local current_ip
             current_ip=$(get_dns_record "$domain" "$subdomain" "$record_type")
 
             if [[ -z "$current_ip" ]]; then
                 log "DEBUG" "No existing $record_type record for $subdomain.$domain"
-                # Still update to create the record
-                update_dns_record "$domain" "$subdomain" "$record_type" "$new_ip"
+                # Create new record
+                update_dns_record "$domain" "$subdomain" "$record_type" "$new_ip" ""
             elif [[ "$current_ip" != "$new_ip" ]]; then
                 log "DEBUG" "IP changed for $subdomain.$domain $record_type: $current_ip -> $new_ip"
-                update_dns_record "$domain" "$subdomain" "$record_type" "$new_ip"
+                update_dns_record "$domain" "$subdomain" "$record_type" "$new_ip" "$current_ip"
             else
                 log "DEBUG" "No change for $subdomain.$domain $record_type (current: $current_ip)"
             fi

@@ -13,7 +13,7 @@ privatekeypath: /path/to/transip.key
 # If not set, logging will only go to stdout
 logfile: /var/log/transip-ddns.log
 
-# IP lookup providers (optional)
+# IP lookup providers
 # The script will try each provider in order until it gets a valid IP
 iplookupproviders:
   - ipv4:
