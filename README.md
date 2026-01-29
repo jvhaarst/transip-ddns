@@ -17,6 +17,7 @@ A bash script that automatically updates DNS records at TransIP with your curren
 
 - [tipctl](https://github.com/transip/tipctl) - TransIP CLI tool
 - [yq](https://github.com/mikefarah/yq) - YAML processor
+- [jq](https://jqlang.github.io/jq/) - JSON processor
 - curl
 
 ### Installing Dependencies

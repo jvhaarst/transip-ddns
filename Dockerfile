@@ -9,6 +9,7 @@ RUN apk add --no-cache \
     curl \
     git \
     composer \
+    jq \
     yq
 
 # Install tipctl globally via composer

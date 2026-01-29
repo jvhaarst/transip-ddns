@@ -20,6 +20,17 @@ IPV4_ADDRESS=""
 IPV6_ADDRESS=""
 declare -a CHANGES_MADE=()
 declare -a ERRORS=()
+TIPCTL_CONFIG_DIR=""
+
+#######################################
+# Cleanup temporary files on exit
+#######################################
+cleanup() {
+    if [[ -n "$TIPCTL_CONFIG_DIR" && -d "$TIPCTL_CONFIG_DIR" ]]; then
+        rm -rf "$TIPCTL_CONFIG_DIR"
+    fi
+}
+trap cleanup EXIT
 
 # Colors for output (disabled if not a terminal)
 if [[ -t 1 ]]; then
@@ -160,6 +171,10 @@ check_dependencies() {
         missing+=("curl")
     fi
 
+    if ! command -v jq &> /dev/null; then
+        missing+=("jq")
+    fi
+
     if [[ ${#missing[@]} -gt 0 ]]; then
         echo "Error: Missing required dependencies: ${missing[*]}" >&2
         echo "Please install them before running this script." >&2
@@ -211,6 +226,60 @@ load_config() {
     log "DEBUG" "Record types: ${RECORD_TYPES[*]}"
     log "DEBUG" "IPv4 providers: ${IPV4_PROVIDERS[*]:-none}"
     log "DEBUG" "IPv6 providers: ${IPV6_PROVIDERS[*]:-none}"
+}
+
+#######################################
+# Setup tipctl with API credentials
+# Creates the tipctl config file with API credentials
+# Must be called after load_config
+#######################################
+setup_tipctl() {
+    log "DEBUG" "Setting up tipctl API connection"
+
+    # Read the private key and escape it for JSON (newlines -> \n)
+    local private_key
+    private_key=$(cat "$PRIVATE_KEY_PATH" | awk '{printf "%s\\n", $0}')
+
+    # Create temporary tipctl config directory (cleaned up on exit)
+    TIPCTL_CONFIG_DIR=$(mktemp -d)
+    local config_dir="${TIPCTL_CONFIG_DIR}/tipctl"
+    mkdir -p "$config_dir"
+
+    # Point tipctl to our temporary config
+    export XDG_CONFIG_HOME="$TIPCTL_CONFIG_DIR"
+
+    # Create the tipctl config file
+    local config_file="${config_dir}/config.json"
+    cat > "$config_file" << EOF
+{
+    "apiUrl": "https://api.transip.nl/v6",
+    "loginName": "${ACCOUNT_NAME}",
+    "apiPrivateKey": "${private_key}",
+    "apiUseWhitelist": false,
+    "showConfigFilePermissionWarning": false
+}
+EOF
+
+    if [[ ! -f "$config_file" ]]; then
+        log "ERROR" "Failed to create tipctl config file: $config_file"
+        return 1
+    fi
+
+    log "DEBUG" "Created temporary tipctl config"
+
+    # Verify setup by testing API connection
+    local test_output
+    test_output=$(run_tipctl api:test 2>&1)
+    local test_exit_code=$?
+
+    if [[ $test_exit_code -ne 0 ]]; then
+        log "ERROR" "tipctl API test failed (exit code: $test_exit_code)"
+        log "ERROR" "Test output: $test_output"
+        return 1
+    fi
+
+    log "INFO" "tipctl API connection verified"
+    return 0
 }
 
 #######################################
@@ -323,25 +392,39 @@ CACHED_DNS_DOMAIN=""
 CACHED_DNS_RECORDS=""
 
 #######################################
+# Run tipctl command, filtering PHP deprecation warnings
+# Arguments:
+#   $@ - Command and arguments to pass to tipctl
+# Returns:
+#   Command output with deprecation warnings removed
+#######################################
+run_tipctl() {
+    # Run tipctl and filter out PHP deprecation warnings from both stdout and stderr
+    # These warnings go to stdout in some PHP versions
+    tipctl "$@" 2>&1 | grep -v "^Deprecated:" | grep -v "^PHP Deprecated:"
+}
+
+#######################################
 # Fetch all DNS records for a domain (single API call)
 # Arguments:
 #   $1 - Domain
 # Sets:
 #   CACHED_DNS_DOMAIN - The domain that was fetched
-#   CACHED_DNS_RECORDS - All DNS records for the domain
+#   CACHED_DNS_RECORDS - All DNS records for the domain (JSON)
 #######################################
 fetch_domain_dns() {
     local domain="$1"
 
     log "DEBUG" "Fetching DNS records for $domain"
     CACHED_DNS_DOMAIN="$domain"
-    CACHED_DNS_RECORDS=$(tipctl domain:dns:getall "$domain" 2>/dev/null) || CACHED_DNS_RECORDS=""
+    CACHED_DNS_RECORDS=$(run_tipctl domain:dns:getbydomainname "$domain" 2>/dev/null) || CACHED_DNS_RECORDS=""
 
-    if [[ -z "$CACHED_DNS_RECORDS" ]]; then
+    if [[ -z "$CACHED_DNS_RECORDS" || "$CACHED_DNS_RECORDS" == "[]" ]]; then
         log "WARN" "No DNS records found for $domain (or failed to fetch)"
+        CACHED_DNS_RECORDS=""
     else
         local record_count
-        record_count=$(echo "$CACHED_DNS_RECORDS" | wc -l | tr -d ' ')
+        record_count=$(echo "$CACHED_DNS_RECORDS" | jq 'length')
         log "DEBUG" "Fetched $record_count DNS records for $domain"
     fi
 }
@@ -371,9 +454,16 @@ get_dns_record() {
         fetch_domain_dns "$domain"
     fi
 
-    # Filter cached records for the specific subdomain and type
+    # Return empty if no cached records
+    if [[ -z "$CACHED_DNS_RECORDS" ]]; then
+        echo ""
+        return
+    fi
+
+    # Filter cached JSON records for the specific subdomain and type
     local result
-    result=$(echo "$CACHED_DNS_RECORDS" | grep -E "^${lookup_subdomain}\s+[0-9]+\s+${record_type}\s+" | awk '{print $4}') || true
+    result=$(echo "$CACHED_DNS_RECORDS" | jq -r --arg name "$lookup_subdomain" --arg type "$record_type" \
+        '.[] | select(.name == $name and .type == $type) | .content' | head -1) || true
 
     echo "$result"
 }
@@ -414,7 +504,7 @@ update_dns_record() {
     else
         log "INFO" "Updating: $change_desc"
 
-        if tipctl domain:dns:updatednsentry "$domain" "$tipctl_subdomain" "$TTL" "$record_type" "$new_value" 2>&1; then
+        if run_tipctl domain:dns:updatednsentry "$domain" "$tipctl_subdomain" "$TTL" "$record_type" "$new_value" 2>&1; then
             CHANGES_MADE+=("$change_desc")
             log "DEBUG" "Successfully updated $change_desc"
         else
@@ -532,6 +622,12 @@ main() {
     parse_args "$@"
     check_dependencies
     load_config
+
+    # Setup tipctl API connection
+    if ! setup_tipctl; then
+        log "ERROR" "Failed to setup tipctl, cannot continue"
+        exit 1
+    fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
         log "INFO" "Running in DRY-RUN mode - no changes will be made"
