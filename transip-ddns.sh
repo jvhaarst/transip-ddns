@@ -242,14 +242,10 @@ setup_tipctl() {
 
     # Create temporary tipctl config directory (cleaned up on exit)
     TIPCTL_CONFIG_DIR=$(mktemp -d)
-    local config_dir="${TIPCTL_CONFIG_DIR}/tipctl"
-    mkdir -p "$config_dir"
-
-    # Point tipctl to our temporary config
-    export XDG_CONFIG_HOME="$TIPCTL_CONFIG_DIR"
 
     # Create the tipctl config file
-    local config_file="${config_dir}/config.json"
+    TIPCTL_CONFIG_FILE="${TIPCTL_CONFIG_DIR}/config.json"
+    local config_file="$TIPCTL_CONFIG_FILE"
     cat > "$config_file" << EOF
 {
     "apiUrl": "https://api.transip.nl/v6",
@@ -391,6 +387,9 @@ lookup_ipv6() {
 CACHED_DNS_DOMAIN=""
 CACHED_DNS_RECORDS=""
 
+# Path to tipctl config file (set by setup_tipctl)
+TIPCTL_CONFIG_FILE=""
+
 #######################################
 # Run tipctl command, filtering PHP deprecation warnings
 # Arguments:
@@ -399,9 +398,8 @@ CACHED_DNS_RECORDS=""
 #   Command output with deprecation warnings removed
 #######################################
 run_tipctl() {
-    # Run tipctl and filter out PHP deprecation warnings from both stdout and stderr
-    # These warnings go to stdout in some PHP versions
-    tipctl "$@" 2>&1 | grep -v "^Deprecated:" | grep -v "^PHP Deprecated:"
+    # Run tipctl with explicit config file and filter out PHP deprecation warnings
+    tipctl --configFile="$TIPCTL_CONFIG_FILE" "$@" 2>&1 | grep -v "^Deprecated:" | grep -v "^PHP Deprecated:"
 }
 
 #######################################

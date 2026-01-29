@@ -1,4 +1,4 @@
-FROM php:8.3-cli-alpine
+FROM php:8.5-cli-alpine
 
 LABEL maintainer="TransIP DDNS" \
       description="Dynamic DNS updater for TransIP using tipctl"
@@ -12,8 +12,8 @@ RUN apk add --no-cache \
     jq \
     yq
 
-# Install tipctl globally via composer
-RUN composer global require transip/tipctl --no-interaction --no-progress \
+# Install tipctl globally via composer (with cache adapter dependency)
+RUN composer global require transip/tipctl symfony/cache --no-interaction --no-progress \
     && ln -s /root/.composer/vendor/bin/tipctl /usr/local/bin/tipctl
 
 # Create directories
