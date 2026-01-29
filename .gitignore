@@ -1,0 +1,15 @@
+# Claude Code
+.claude/
+
+# Plan files
+plan/
+
+# Configuration (may contain secrets)
+config.yaml
+
+# Logs
+*.log
+
+# TransIP private key
+*.key
+transip.key

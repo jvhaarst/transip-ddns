@@ -1,0 +1,50 @@
+# TransIP Dynamic DNS Configuration Example
+#
+# Copy this file to config.yaml and update with your settings
+
+# TransIP account name (required)
+accountname: your-transip-username
+
+# Path to your TransIP private key file (required)
+# Generate this in the TransIP control panel under API settings
+privatekeypath: /path/to/transip.key
+
+# Log file path (optional)
+# If not set, logging will only go to stdout
+logfile: /var/log/transip-ddns.log
+
+# IP lookup providers (optional)
+# The script will try each provider in order until it gets a valid IP
+iplookupproviders:
+  - ipv4:
+      - 'https://ipv4.icanhazip.com/'
+      - 'https://api.ipify.org/'
+      - 'https://ifconfig.me/ip'
+  - ipv6:
+      - 'https://ipv6.icanhazip.com/'
+      - 'https://api6.ipify.org/'
+
+# Domains to update (required)
+# List all domains you want to update DNS records for
+domains:
+  - example.com
+  - example.org
+
+# Subdomains to update (required)
+# Use '/' or '@' for the root domain
+# List all subdomains you want to update
+subdomains:
+  - '/'           # Root domain (example.com)
+  - '@'           # Alternative syntax for root domain
+  - www           # www.example.com
+  - mail          # mail.example.com
+  - vpn           # vpn.example.com
+
+# Time to live in seconds (optional, default: 300)
+timetolive: 300
+
+# DNS record types to update (required)
+# A = IPv4, AAAA = IPv6
+recordtypes:
+  - A
+  - AAAA
