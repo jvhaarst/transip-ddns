@@ -174,8 +174,8 @@ load_config() {
     log "INFO" "Loading configuration from $CONFIG_FILE"
 
     # Required fields
-    ACCOUNT_NAME=$(yq -r '.accountname // empty' "$CONFIG_FILE")
-    PRIVATE_KEY_PATH=$(yq -r '.privatekeypath // empty' "$CONFIG_FILE")
+    ACCOUNT_NAME=$(yq -r '.accountname // ""' "$CONFIG_FILE")
+    PRIVATE_KEY_PATH=$(yq -r '.privatekeypath // ""' "$CONFIG_FILE")
 
     if [[ -z "$ACCOUNT_NAME" ]]; then
         log "ERROR" "accountname is required in configuration"
@@ -193,12 +193,12 @@ load_config() {
     fi
 
     # Optional fields with defaults
-    LOGFILE=$(yq -r '.logfile // empty' "$CONFIG_FILE")
+    LOGFILE=$(yq -r '.logfile // ""' "$CONFIG_FILE")
     TTL=$(yq -r '.timetolive // "300"' "$CONFIG_FILE")
 
     # Arrays
-    readarray -t IPV4_PROVIDERS < <(yq -r '.iplookupproviders[] | .ipv4[]? // empty' "$CONFIG_FILE" 2>/dev/null || true)
-    readarray -t IPV6_PROVIDERS < <(yq -r '.iplookupproviders[] | .ipv6[]? // empty' "$CONFIG_FILE" 2>/dev/null || true)
+    readarray -t IPV4_PROVIDERS < <(yq -r '.iplookupproviders[].ipv4[]?' "$CONFIG_FILE" 2>/dev/null | grep -v '^null$' || true)
+    readarray -t IPV6_PROVIDERS < <(yq -r '.iplookupproviders[].ipv6[]?' "$CONFIG_FILE" 2>/dev/null | grep -v '^null$' || true)
     readarray -t DOMAINS < <(yq -r '.domains[]' "$CONFIG_FILE")
     readarray -t SUBDOMAINS < <(yq -r '.subdomains[]' "$CONFIG_FILE")
     readarray -t RECORD_TYPES < <(yq -r '.recordtypes[]' "$CONFIG_FILE")

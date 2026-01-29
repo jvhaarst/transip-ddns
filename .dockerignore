@@ -1,0 +1,21 @@
+# Git
+.git
+.gitignore
+
+# Claude
+.claude
+
+# Plan
+plan
+
+# Local config (may contain secrets)
+config.yaml
+*.key
+
+# Documentation
+README.md
+LICENSE
+
+# Helm chart
+charts/
+helm/

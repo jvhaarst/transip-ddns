@@ -10,6 +10,7 @@ A bash script that automatically updates DNS records at TransIP with your curren
 - Dry-run mode for testing
 - Verbose logging
 - Execution summary
+- Docker support with scheduled mode
 
 ## Requirements
 
@@ -113,6 +114,80 @@ recordtypes:
 | `-s, --summary` | Show summary of changes at the end |
 | `-h, --help` | Show help message |
 | `--version` | Show version |
+
+## Docker
+
+### Building the Image
+
+```bash
+docker build -t transip-ddns .
+```
+
+### Running the Container
+
+The container supports two modes: single-run and scheduled.
+
+**Single-run mode** (runs once and exits):
+```bash
+docker run --rm \
+    -v $(pwd)/config.yaml:/config/config.yaml:ro \
+    -v $(pwd)/transip.key:/keys/transip.key:ro \
+    transip-ddns
+```
+
+**Scheduled mode** (runs continuously at an interval):
+```bash
+docker run -d \
+    --name transip-ddns \
+    --restart unless-stopped \
+    -e SCHEDULE_INTERVAL=300 \
+    -v $(pwd)/config.yaml:/config/config.yaml:ro \
+    -v $(pwd)/transip.key:/keys/transip.key:ro \
+    transip-ddns
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONFIG_FILE` | `/config/config.yaml` | Path to configuration file inside container |
+| `SCHEDULE_INTERVAL` | `0` | Interval in seconds between runs (0 = single-run mode) |
+| `SCRIPT_ARGS` | `-s` | Arguments passed to the script |
+
+### Volume Mounts
+
+| Container Path | Description |
+|----------------|-------------|
+| `/config/config.yaml` | Configuration file (required) |
+| `/keys/` | Directory for private key file |
+
+### Docker Compose
+
+```yaml
+version: '3.8'
+services:
+  transip-ddns:
+    build: .
+    # Or use a pre-built image:
+    # image: your-registry/transip-ddns:latest
+    restart: unless-stopped
+    environment:
+      - SCHEDULE_INTERVAL=300
+      - SCRIPT_ARGS=-v -s
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - ./transip.key:/keys/transip.key:ro
+```
+
+### Configuration for Docker
+
+When using Docker, set `privatekeypath` in your config to `/keys/transip.key`:
+
+```yaml
+accountname: your-transip-username
+privatekeypath: /keys/transip.key
+# ... rest of config
+```
 
 ## Scheduling
 
