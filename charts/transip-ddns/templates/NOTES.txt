@@ -1,0 +1,23 @@
+TransIP Dynamic DNS has been installed.
+
+Chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+Release: {{ .Release.Name }}
+
+Configuration:
+  Schedule: {{ .Values.schedule }}
+  Account: {{ .Values.transip.accountName }}
+  Domains: {{ .Values.config.domains | join ", " }}
+  Subdomains: {{ .Values.config.subdomains | join ", " }}
+  Record Types: {{ .Values.config.recordTypes | join ", " }}
+
+To check the CronJob status:
+  kubectl get cronjob {{ include "transip-ddns.fullname" . }} -n {{ .Release.Namespace }}
+
+To view recent job runs:
+  kubectl get jobs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+To view logs from the most recent job:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} --tail=50
+
+To manually trigger a run:
+  kubectl create job --from=cronjob/{{ include "transip-ddns.fullname" . }} {{ include "transip-ddns.fullname" . }}-manual -n {{ .Release.Namespace }}

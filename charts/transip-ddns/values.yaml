@@ -1,0 +1,102 @@
+# TransIP Dynamic DNS Helm Chart Values
+
+# Container image configuration
+image:
+  repository: transip-ddns
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Image pull secrets (if using private registry)
+imagePullSecrets: []
+
+# CronJob schedule (default: every 5 minutes)
+schedule: "*/5 * * * *"
+
+# Timezone for the CronJob (optional)
+# timezone: "Europe/Amsterdam"
+
+# Number of successful/failed jobs to keep
+successfulJobsHistoryLimit: 1
+failedJobsHistoryLimit: 3
+
+# Restart policy for the job
+restartPolicy: OnFailure
+
+# Script arguments (passed to transip-ddns.sh)
+scriptArgs: "-s"
+
+# TransIP Configuration
+transip:
+  # TransIP account name (required)
+  accountName: ""
+
+  # Private key - provide via existingSecret or create new secret
+  privateKey:
+    # Use existing secret (recommended for production)
+    existingSecret: ""
+    existingSecretKey: "transip.key"
+    # Or provide key directly (will be stored in a new secret)
+    # WARNING: Only use for testing, prefer existingSecret
+    value: ""
+
+# DNS Configuration
+config:
+  # Log file path inside container (optional, logs also go to stdout)
+  logfile: ""
+
+  # IP lookup providers
+  ipLookupProviders:
+    ipv4:
+      - "https://ipv4.icanhazip.com/"
+      - "https://api.ipify.org/"
+    ipv6:
+      - "https://ipv6.icanhazip.com/"
+      - "https://api6.ipify.org/"
+
+  # Domains to update (required)
+  domains: []
+  #  - example.com
+  #  - example.org
+
+  # Subdomains to update (required)
+  # Use '@' for root domain
+  subdomains:
+    - "@"
+
+  # TTL in seconds
+  timeToLive: 300
+
+  # Record types to update
+  recordTypes:
+    - A
+    - AAAA
+
+# Pod resource limits
+resources: {}
+#  limits:
+#    cpu: 100m
+#    memory: 128Mi
+#  requests:
+#    cpu: 50m
+#    memory: 64Mi
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity rules
+affinity: {}
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod security context
+podSecurityContext: {}
+#  fsGroup: 1000
+
+# Container security context
+securityContext: {}
+#  runAsNonRoot: true
+#  runAsUser: 1000

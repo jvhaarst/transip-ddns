@@ -11,6 +11,7 @@ A bash script that automatically updates DNS records at TransIP with your curren
 - Verbose logging
 - Execution summary
 - Docker support with scheduled mode
+- Helm chart for Kubernetes deployment
 
 ## Requirements
 
@@ -187,6 +188,92 @@ When using Docker, set `privatekeypath` in your config to `/keys/transip.key`:
 accountname: your-transip-username
 privatekeypath: /keys/transip.key
 # ... rest of config
+```
+
+## Kubernetes (Helm)
+
+### Prerequisites
+
+- Kubernetes cluster
+- Helm 3.x
+- Container image available (built and pushed to a registry)
+
+### Installation
+
+1. Create a secret with your TransIP private key:
+   ```bash
+   kubectl create secret generic transip-key --from-file=transip.key=/path/to/your/transip.key
+   ```
+
+2. Install the chart:
+   ```bash
+   helm install transip-ddns ./charts/transip-ddns \
+     --set transip.accountName=your-username \
+     --set transip.privateKey.existingSecret=transip-key \
+     --set config.domains[0]=example.com \
+     --set config.subdomains[0]=@ \
+     --set config.subdomains[1]=www
+   ```
+
+### Using a values file
+
+Create a `my-values.yaml`:
+
+```yaml
+image:
+  repository: ghcr.io/your-username/transip-ddns
+  tag: latest
+
+schedule: "*/5 * * * *"
+
+transip:
+  accountName: your-transip-username
+  privateKey:
+    existingSecret: transip-key
+
+config:
+  domains:
+    - example.com
+    - example.org
+  subdomains:
+    - "@"
+    - www
+    - mail
+  recordTypes:
+    - A
+    - AAAA
+```
+
+Install with:
+```bash
+helm install transip-ddns ./charts/transip-ddns -f my-values.yaml
+```
+
+### Configuration Options
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `image.repository` | Container image repository | `transip-ddns` |
+| `image.tag` | Container image tag | `latest` |
+| `schedule` | Cron schedule | `*/5 * * * *` |
+| `transip.accountName` | TransIP account name | `""` |
+| `transip.privateKey.existingSecret` | Existing secret name | `""` |
+| `config.domains` | List of domains to update | `[]` |
+| `config.subdomains` | List of subdomains | `["@"]` |
+| `config.timeToLive` | DNS TTL in seconds | `300` |
+| `config.recordTypes` | Record types to update | `["A", "AAAA"]` |
+
+### Manual Trigger
+
+To manually trigger a DNS update:
+```bash
+kubectl create job --from=cronjob/transip-ddns transip-ddns-manual
+```
+
+### Viewing Logs
+
+```bash
+kubectl logs -l app.kubernetes.io/name=transip-ddns --tail=50
 ```
 
 ## Scheduling

@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "transip-ddns.fullname" . }}
+  labels:
+    {{- include "transip-ddns.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    accountname: {{ .Values.transip.accountName | quote }}
+    privatekeypath: /keys/transip.key
+    {{- if .Values.config.logfile }}
+    logfile: {{ .Values.config.logfile | quote }}
+    {{- end }}
+    iplookupproviders:
+      {{- if .Values.config.ipLookupProviders.ipv4 }}
+      - ipv4:
+        {{- range .Values.config.ipLookupProviders.ipv4 }}
+          - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      {{- if .Values.config.ipLookupProviders.ipv6 }}
+      - ipv6:
+        {{- range .Values.config.ipLookupProviders.ipv6 }}
+          - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+    domains:
+      {{- range .Values.config.domains }}
+      - {{ . | quote }}
+      {{- end }}
+    subdomains:
+      {{- range .Values.config.subdomains }}
+      - {{ . | quote }}
+      {{- end }}
+    timetolive: {{ .Values.config.timeToLive }}
+    recordtypes:
+      {{- range .Values.config.recordTypes }}
+      - {{ . }}
+      {{- end }}

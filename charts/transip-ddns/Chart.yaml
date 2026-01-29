@@ -1,0 +1,16 @@
+apiVersion: v2
+name: transip-ddns
+description: Dynamic DNS updater for TransIP domains
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - ddns
+  - dns
+  - transip
+  - dynamic-dns
+home: https://github.com/transip/tipctl
+sources:
+  - https://github.com/transip/tipctl
+maintainers:
+  - name: jvhaarst
