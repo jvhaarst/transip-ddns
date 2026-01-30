@@ -202,7 +202,13 @@ privatekeypath: /keys/transip.key
 
 - Kubernetes cluster
 - Helm 3.x
-- Container image available (built and pushed to a registry)
+
+### Add Helm Repository
+
+```bash
+helm repo add transip-ddns https://jvhaarst.github.io/transip-ddns
+helm repo update
+```
 
 ### Installation
 
@@ -213,7 +219,7 @@ privatekeypath: /keys/transip.key
 
 2. Install the chart:
    ```bash
-   helm install transip-ddns ./charts/transip-ddns \
+   helm install transip-ddns transip-ddns/transip-ddns \
      --set transip.accountName=your-username \
      --set transip.privateKey.existingSecret=transip-key \
      --set config.domains[0]=example.com \
