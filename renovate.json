@@ -2,5 +2,28 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": ["^Dockerfile$"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\nARG\\s+\\w+_VERSION=(?<currentValue>\\S+)"
+      ]
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["charts/.+/Chart\\.yaml$"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\nappVersion:\\s*[\"']?(?<currentValue>[^\"'\\s]+)[\"']?"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "matchDatasources": ["packagist"],
+      "matchPackageNames": ["transip/tipctl"],
+      "groupName": "tipctl"
+    }
   ]
 }

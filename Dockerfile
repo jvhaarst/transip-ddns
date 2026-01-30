@@ -13,7 +13,9 @@ RUN apk add --no-cache \
     yq
 
 # Install tipctl globally via composer (with cache adapter dependency)
-RUN composer global require transip/tipctl symfony/cache --no-interaction --no-progress \
+# renovate: datasource=packagist depName=transip/tipctl
+ARG TIPCTL_VERSION=6.34.2
+RUN composer global require transip/tipctl:${TIPCTL_VERSION} symfony/cache --no-interaction --no-progress \
     && ln -s /root/.composer/vendor/bin/tipctl /usr/local/bin/tipctl
 
 # Create directories
