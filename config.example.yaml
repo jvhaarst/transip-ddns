@@ -40,9 +40,6 @@ subdomains:
   - mail          # mail.example.com
   - vpn           # vpn.example.com
 
-# Time to live in seconds (optional, default: 300)
-timetolive: 300
-
 # DNS record types to update (required)
 # A = IPv4, AAAA = IPv6
 recordtypes:

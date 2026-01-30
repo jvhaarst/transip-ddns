@@ -209,7 +209,9 @@ load_config() {
 
     # Optional fields with defaults
     LOGFILE=$(yq -r '.logfile // ""' "$CONFIG_FILE")
-    TTL=$(yq -r '.timetolive // "300"' "$CONFIG_FILE")
+
+    # Default TTL for new records (existing records keep their TTL)
+    DEFAULT_TTL=300
 
     # Arrays
     readarray -t IPV4_PROVIDERS < <(yq -r '.iplookupproviders[].ipv4[]?' "$CONFIG_FILE" 2>/dev/null | grep -v '^null$' || true)
@@ -220,7 +222,6 @@ load_config() {
 
     log "DEBUG" "Account: $ACCOUNT_NAME"
     log "DEBUG" "Private key: $PRIVATE_KEY_PATH"
-    log "DEBUG" "TTL: $TTL"
     log "DEBUG" "Domains: ${DOMAINS[*]}"
     log "DEBUG" "Subdomains: ${SUBDOMAINS[*]}"
     log "DEBUG" "Record types: ${RECORD_TYPES[*]}"
@@ -236,25 +237,31 @@ load_config() {
 setup_tipctl() {
     log "DEBUG" "Setting up tipctl API connection"
 
-    # Read the private key and escape it for JSON (newlines -> \n)
-    local private_key
-    private_key=$(cat "$PRIVATE_KEY_PATH" | awk '{printf "%s\\n", $0}')
-
     # Create temporary tipctl config directory (cleaned up on exit)
     TIPCTL_CONFIG_DIR=$(mktemp -d)
+    chmod 700 "$TIPCTL_CONFIG_DIR"
 
-    # Create the tipctl config file
+    # Create the tipctl config file using jq for proper JSON escaping
     TIPCTL_CONFIG_FILE="${TIPCTL_CONFIG_DIR}/config.json"
     local config_file="$TIPCTL_CONFIG_FILE"
-    cat > "$config_file" << EOF
-{
-    "apiUrl": "https://api.transip.nl/v6",
-    "loginName": "${ACCOUNT_NAME}",
-    "apiPrivateKey": "${private_key}",
-    "apiUseWhitelist": false,
-    "showConfigFilePermissionWarning": false
-}
-EOF
+
+    # Read private key and use jq to create properly escaped JSON
+    local private_key
+    private_key=$(cat "$PRIVATE_KEY_PATH")
+
+    jq -n \
+        --arg apiUrl "https://api.transip.nl/v6" \
+        --arg loginName "$ACCOUNT_NAME" \
+        --arg apiPrivateKey "$private_key" \
+        '{
+            apiUrl: $apiUrl,
+            loginName: $loginName,
+            apiPrivateKey: $apiPrivateKey,
+            apiUseWhitelist: false,
+            showConfigFilePermissionWarning: false
+        }' > "$config_file"
+
+    chmod 600 "$config_file"
 
     if [[ ! -f "$config_file" ]]; then
         log "ERROR" "Failed to create tipctl config file: $config_file"
@@ -398,8 +405,8 @@ TIPCTL_CONFIG_FILE=""
 #   Command output with deprecation warnings removed
 #######################################
 run_tipctl() {
-    # Run tipctl with explicit config file and filter out PHP deprecation warnings
-    tipctl --configFile="$TIPCTL_CONFIG_FILE" "$@" 2>&1 | grep -v "^Deprecated:" | grep -v "^PHP Deprecated:"
+    # Run tipctl with explicit config file and filter out PHP deprecation warnings and empty lines
+    tipctl --configFile="$TIPCTL_CONFIG_FILE" "$@" 2>&1 | grep -v "^Deprecated:" | grep -v "^PHP Deprecated:" | grep -v "^[[:space:]]*$"
 }
 
 #######################################
@@ -467,6 +474,40 @@ get_dns_record() {
 }
 
 #######################################
+# Get current DNS record TTL from cached data
+# Arguments:
+#   $1 - Domain
+#   $2 - Subdomain (use @ for root)
+#   $3 - Record type (A or AAAA)
+# Returns:
+#   Prints current TTL or empty string
+#######################################
+get_dns_record_ttl() {
+    local domain="$1"
+    local subdomain="$2"
+    local record_type="$3"
+
+    # Normalize subdomain for lookup
+    local lookup_subdomain="$subdomain"
+    if [[ "$subdomain" == "/" || "$subdomain" == "@" ]]; then
+        lookup_subdomain="@"
+    fi
+
+    # Return empty if no cached records
+    if [[ -z "$CACHED_DNS_RECORDS" ]]; then
+        echo ""
+        return
+    fi
+
+    # Filter cached JSON records for the specific subdomain and type
+    local result
+    result=$(echo "$CACHED_DNS_RECORDS" | jq -r --arg name "$lookup_subdomain" --arg type "$record_type" \
+        '.[] | select(.name == $name and .type == $type) | .expire' | head -1) || true
+
+    echo "$result"
+}
+
+#######################################
 # Update DNS record using tipctl
 # Arguments:
 #   $1 - Domain
@@ -474,6 +515,7 @@ get_dns_record() {
 #   $3 - Record type
 #   $4 - New value
 #   $5 - Old value (optional, for display)
+#   $6 - Existing TTL (optional, for updates)
 #######################################
 update_dns_record() {
     local domain="$1"
@@ -481,11 +523,18 @@ update_dns_record() {
     local record_type="$3"
     local new_value="$4"
     local old_value="${5:-}"
+    local existing_ttl="${6:-}"
 
     # Normalize subdomain for tipctl
     local tipctl_subdomain="$subdomain"
     if [[ "$subdomain" == "/" ]]; then
         tipctl_subdomain="@"
+    fi
+
+    # Use existing TTL for updates, default TTL for new records
+    local use_ttl="$DEFAULT_TTL"
+    if [[ -n "$existing_ttl" ]]; then
+        use_ttl="$existing_ttl"
     fi
 
     # Build change description with old -> new transition
@@ -502,7 +551,7 @@ update_dns_record() {
     else
         log "INFO" "Updating: $change_desc"
 
-        if run_tipctl domain:dns:updatednsentry "$domain" "$tipctl_subdomain" "$TTL" "$record_type" "$new_value" 2>&1; then
+        if run_tipctl domain:dns:updatednsentry "$domain" "$tipctl_subdomain" "$use_ttl" "$record_type" "$new_value" 2>&1; then
             CHANGES_MADE+=("$change_desc")
             log "DEBUG" "Successfully updated $change_desc"
         else
@@ -561,11 +610,14 @@ process_domain() {
 
             if [[ -z "$current_ip" ]]; then
                 log "DEBUG" "No existing $record_type record for $subdomain.$domain"
-                # Create new record
-                update_dns_record "$domain" "$subdomain" "$record_type" "$new_ip" ""
+                # Create new record (use config TTL)
+                update_dns_record "$domain" "$subdomain" "$record_type" "$new_ip" "" ""
             elif [[ "$current_ip" != "$new_ip" ]]; then
-                log "DEBUG" "IP changed for $subdomain.$domain $record_type: $current_ip -> $new_ip"
-                update_dns_record "$domain" "$subdomain" "$record_type" "$new_ip" "$current_ip"
+                # Get existing TTL for update (tipctl requires matching TTL)
+                local current_ttl
+                current_ttl=$(get_dns_record_ttl "$domain" "$subdomain" "$record_type")
+                log "DEBUG" "IP changed for $subdomain.$domain $record_type: $current_ip -> $new_ip (TTL: $current_ttl)"
+                update_dns_record "$domain" "$subdomain" "$record_type" "$new_ip" "$current_ip" "$current_ttl"
             else
                 log "DEBUG" "No change for $subdomain.$domain $record_type (current: $current_ip)"
             fi

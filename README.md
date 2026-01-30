@@ -73,9 +73,6 @@ subdomains:
   - '/'
   - www
 
-# TTL in seconds
-timetolive: 300
-
 # Record types
 recordtypes:
   - A
@@ -269,7 +266,6 @@ helm install transip-ddns ./charts/transip-ddns -f my-values.yaml
 | `transip.privateKey.existingSecret` | Existing secret name | `""` |
 | `config.domains` | List of domains to update | `[]` |
 | `config.subdomains` | List of subdomains | `["@"]` |
-| `config.timeToLive` | DNS TTL in seconds | `300` |
 | `config.recordTypes` | Record types to update | `["A", "AAAA"]` |
 
 ### Manual Trigger

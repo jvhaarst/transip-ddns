@@ -32,7 +32,6 @@ data:
       {{- range .Values.config.subdomains }}
       - {{ . | quote }}
       {{- end }}
-    timetolive: {{ .Values.config.timeToLive }}
     recordtypes:
       {{- range .Values.config.recordTypes }}
       - {{ . }}
