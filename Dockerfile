@@ -14,7 +14,7 @@ RUN apk add --no-cache \
 
 # Install tipctl globally via composer (with cache adapter dependency)
 # renovate: datasource=packagist depName=transip/tipctl
-ARG TIPCTL_VERSION=6.34.7
+ARG TIPCTL_VERSION=6.34.9
 RUN composer global require transip/tipctl:${TIPCTL_VERSION} symfony/cache --no-interaction --no-progress \
     && ln -s /root/.composer/vendor/bin/tipctl /usr/local/bin/tipctl
 

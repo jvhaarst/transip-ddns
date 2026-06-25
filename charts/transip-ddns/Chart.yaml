@@ -4,7 +4,7 @@ description: Dynamic DNS updater for TransIP domains
 type: application
 version: 0.2.3
 # renovate: datasource=packagist depName=transip/tipctl
-appVersion: "6.34.7"
+appVersion: "6.34.9"
 keywords:
   - ddns
   - dns
