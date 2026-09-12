@@ -25,6 +25,17 @@
   ],
   "packageRules": [
     {
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
       "matchDatasources": [
         "packagist"
       ],
