@@ -342,7 +342,13 @@ setup_tipctl() {
             return 0
         fi
 
-        if [[ "$test_output" == *"already used in another active access token"* ]]; then
+        # tipctl word-wraps its error output to the terminal width, so the
+        # message arrives split mid-word ("...active access tok\nen."). Match
+        # against the output with all whitespace removed, which no wrap
+        # position can defeat.
+        local test_output_flat="${test_output//[[:space:]]/}"
+
+        if [[ "$test_output_flat" == *"alreadyusedinanotheractiveaccesstoken"* ]]; then
             if (( attempt < max_attempts )); then
                 local backoff=$(( attempt + 1 ))
                 log "WARN" "Access token label collision (attempt ${attempt}/${max_attempts}), retrying in ${backoff}s"
@@ -612,25 +618,35 @@ update_dns_record() {
         use_ttl="$existing_ttl"
     fi
 
-    # Build change description with old -> new transition
-    local change_desc
+    # Build change description with old -> new transition, and pick the tipctl
+    # verb. An existing record is a PATCH (updatednsentry); a record that is
+    # not in the zone yet is a POST (adddnsentry). updatednsentry on a missing
+    # record returns 404 "Could not find match for DNS entry", so the two are
+    # not interchangeable. Both take the same arguments in the same order.
+    local change_desc tipctl_verb action_gerund action_past
     if [[ -n "$old_value" ]]; then
         change_desc="${subdomain}.${domain} ${record_type}: ${old_value} -> ${new_value}"
+        tipctl_verb="domain:dns:updatednsentry"
+        action_gerund="Updating"
+        action_past="update"
     else
         change_desc="${subdomain}.${domain} ${record_type}: (new) -> ${new_value}"
+        tipctl_verb="domain:dns:adddnsentry"
+        action_gerund="Creating"
+        action_past="create"
     fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log "INFO" "[DRY-RUN] Would update: $change_desc"
+        log "INFO" "[DRY-RUN] Would ${action_past}: $change_desc"
         CHANGES_MADE+=("[DRY-RUN] $change_desc")
     else
-        log "INFO" "Updating: $change_desc"
+        log "INFO" "${action_gerund}: $change_desc"
 
-        if run_tipctl domain:dns:updatednsentry "$domain" "$tipctl_subdomain" "$use_ttl" "$record_type" "$new_value" 2>&1; then
+        if run_tipctl "$tipctl_verb" "$domain" "$tipctl_subdomain" "$use_ttl" "$record_type" "$new_value" 2>&1; then
             CHANGES_MADE+=("$change_desc")
-            log "DEBUG" "Successfully updated $change_desc"
+            log "DEBUG" "Successfully ${action_past}d $change_desc"
         else
-            local error_msg="Failed to update $change_desc"
+            local error_msg="Failed to ${action_past} $change_desc"
             ERRORS+=("$error_msg")
             log "ERROR" "$error_msg"
         fi
