@@ -14,10 +14,12 @@ DRY_RUN=false
 VERBOSE=false
 SUMMARY=false
 CONFIG_FILE=""
+NODE_MODE=false
 
 # Runtime variables
 IPV4_ADDRESS=""
 IPV6_ADDRESS=""
+declare -a NODE_ALIASES=()
 declare -a CHANGES_MADE=()
 declare -a ERRORS=()
 TIPCTL_CONFIG_DIR=""
@@ -61,12 +63,17 @@ Options:
     -n, --dry-run           Show what would be done without making changes
     -v, --verbose           Show detailed output of operations
     -s, --summary           Show summary of changes at the end
+        --node-mode         Write only the records belonging to this node, named
+                            by \$NODE_NAME plus any nodealiases entries for it.
+                            For a hostNetwork DaemonSet, where the IPv6 lookup
+                            returns this node's own address.
     -h, --help              Show this help message
     --version               Show version information
 
 Example:
     $(basename "$0") -c /etc/transip-ddns/config.yaml -v -s
     $(basename "$0") --config config.yaml --dry-run
+    NODE_NAME=raspi5 $(basename "$0") -c config.yaml --node-mode -s
 
 EOF
 }
@@ -125,6 +132,10 @@ parse_args() {
                 SUMMARY=true
                 shift
                 ;;
+            --node-mode)
+                NODE_MODE=true
+                shift
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -151,6 +162,34 @@ parse_args() {
         echo "Error: Configuration file not found: $CONFIG_FILE" >&2
         exit 1
     fi
+
+    if [[ "$NODE_MODE" == "true" && -z "${NODE_NAME:-}" ]]; then
+        echo "Error: --node-mode requires the NODE_NAME environment variable" >&2
+        echo "       In Kubernetes, set it from the downward API (spec.nodeName)." >&2
+        exit 1
+    fi
+}
+
+#######################################
+# Record names this node owns, one per line: the node's own name first, then
+# any nodealiases entries for it. Duplicates are dropped so an alias that
+# repeats the node name cannot make the record be written twice.
+# Arguments:
+#   $1 - node name
+#######################################
+resolve_node_record_names() {
+    local node_name="$1"
+    local seen=""
+    local name
+
+    for name in "$node_name" ${NODE_ALIASES[@]+"${NODE_ALIASES[@]}"}; do
+        [[ -z "$name" ]] && continue
+        case " $seen " in
+            *" $name "*) continue ;;
+        esac
+        seen="$seen $name"
+        echo "$name"
+    done
 }
 
 #######################################
@@ -220,6 +259,17 @@ load_config() {
     readarray -t SUBDOMAINS < <(yq -r '.subdomains[]' "$CONFIG_FILE")
     readarray -t RECORD_TYPES < <(yq -r '.recordtypes[]' "$CONFIG_FILE")
 
+    # nodealiases maps a node name to extra record names it owns, e.g.
+    #   nodealiases:
+    #     raspi5:
+    #       - backup
+    # Only consulted in --node-mode.
+    if [[ "$NODE_MODE" == "true" ]]; then
+        readarray -t NODE_ALIASES < <(yq -r ".nodealiases.\"${NODE_NAME}\"[]?" "$CONFIG_FILE" 2>/dev/null | grep -v '^null$' || true)
+        readarray -t SUBDOMAINS < <(resolve_node_record_names "$NODE_NAME")
+        log "INFO" "Node mode: $NODE_NAME owns ${SUBDOMAINS[*]}"
+    fi
+
     log "DEBUG" "Account: $ACCOUNT_NAME"
     log "DEBUG" "Private key: $PRIVATE_KEY_PATH"
     log "DEBUG" "Domains: ${DOMAINS[*]}"
@@ -270,19 +320,44 @@ setup_tipctl() {
 
     log "DEBUG" "Created temporary tipctl config"
 
-    # Verify setup by testing API connection
-    local test_output
-    test_output=$(run_tipctl api:test 2>&1)
-    local test_exit_code=$?
+    # Verify setup by testing API connection.
+    #
+    # Retry on a label collision. tipctl names each access token
+    # api.cli-<epoch-seconds>, and TransIP rejects a label that another active
+    # token already uses. Sequential runs never collide because a tipctl
+    # invocation takes about a second, but N pods of a DaemonSet starting
+    # together request their tokens in the same second and all but one get
+    # "The label 'api.cli-...' is already used in another active access token"
+    # with a 401. Waiting a second or two is enough: the next attempt mints a
+    # new label. tipctl exposes no way to set the label itself.
+    local test_output test_exit_code attempt
+    local max_attempts=5
 
-    if [[ $test_exit_code -ne 0 ]]; then
+    for (( attempt = 1; attempt <= max_attempts; attempt++ )); do
+        test_output=$(run_tipctl api:test 2>&1)
+        test_exit_code=$?
+
+        if [[ $test_exit_code -eq 0 ]]; then
+            log "INFO" "tipctl API connection verified"
+            return 0
+        fi
+
+        if [[ "$test_output" == *"already used in another active access token"* ]]; then
+            if (( attempt < max_attempts )); then
+                local backoff=$(( attempt + 1 ))
+                log "WARN" "Access token label collision (attempt ${attempt}/${max_attempts}), retrying in ${backoff}s"
+                sleep "$backoff"
+                continue
+            fi
+            log "ERROR" "Access token label still colliding after ${max_attempts} attempts"
+        fi
+
         log "ERROR" "tipctl API test failed (exit code: $test_exit_code)"
         log "ERROR" "Test output: $test_output"
         return 1
-    fi
+    done
 
-    log "INFO" "tipctl API connection verified"
-    return 0
+    return 1
 }
 
 #######################################

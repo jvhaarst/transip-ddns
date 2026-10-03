@@ -331,3 +331,53 @@ sudo systemctl enable --now transip-ddns.timer
 ## License
 
 MIT
+
+## Per-node AAAA records (`nodeMode`)
+
+A records and AAAA records need different deployments, because of how the address is found.
+
+The updater asks an external service what source address the connection came from. Over IPv4
+that is the shared WAN address, so one CronJob publishes it for every subdomain from anywhere.
+Over IPv6 there is no NAT: the lookup returns *that host's own* address — and from the pod
+network there is no IPv6 route at all, so the CronJob logs
+`Skipping AAAA record ... no IPv6 address` and silently writes nothing.
+
+`nodeMode` deploys a DaemonSet with `hostNetwork: true` alongside the CronJob. Each pod writes
+only the records its own node owns: `$NODE_NAME` from the downward API, plus any `nodeAliases`
+entries for it.
+
+```yaml
+config:
+  recordTypes:
+    - A        # the CronJob keeps A; leave AAAA out or rendering fails
+nodeMode:
+  enabled: true
+  nodeAliases:
+    raspi5:
+      - backup   # raspi5 also answers for backup.<domain>
+```
+
+Rendering fails deliberately if `nodeMode.enabled` is true and `config.recordTypes` still
+contains `AAAA` — two writers for one name would fight — or if
+`config.ipLookupProviders.ipv6` is empty, since node mode has nothing to ask.
+
+### Why the lookup, and not `ip -6 addr`
+
+Reading the interface looks simpler and is worse:
+
+- `fc00::/7` ULAs are **scope global** in Linux, so `ip -6 addr show scope global` returns them
+  too, and on at least one host the ULA is listed *first*.
+- A node with addresses on both `eth0` and `wlan0` gives two global addresses with no flag
+  distinguishing them. The lookup follows the default route and returns the right one.
+- The image has no `iproute2`; `ip` is busybox's.
+
+Verified on a four-node cluster: with `hostNetwork`, every node returned its own correct global
+address, and `ipv6.icanhazip.com`, `api6.ipify.org` and `ipv6.wtfismyip.com` agreed on each.
+
+### Running it by hand
+
+```bash
+NODE_NAME=raspi5 ./transip-ddns.sh -c config.yaml --node-mode --dry-run -v -s
+```
+
+`--node-mode` without `NODE_NAME` refuses to start rather than guessing.

@@ -1,0 +1,94 @@
+{{- if .Values.nodeMode.enabled }}
+# One pod per node, each writing only the records its own node owns.
+#
+# hostNetwork is required, not a preference: the address is discovered by asking
+# an external service what source address the connection came from, and from the
+# pod network that lookup has no IPv6 route at all. Verified 2026-10-03 — with
+# hostNetwork every node returned its own correct global address from
+# ipv6.icanhazip.com, api6.ipify.org and ipv6.wtfismyip.com alike.
+#
+# The lookup is also more reliable than reading the interface: it follows the
+# default route, so a node with addresses on both eth0 and wlan0 yields the eth0
+# one, and ULAs (fc00::/7, which Linux reports as scope global) never appear.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "transip-ddns.fullname" . }}-node
+  labels:
+    {{- include "transip-ddns.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node
+spec:
+  selector:
+    matchLabels:
+      {{- include "transip-ddns.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: node
+  template:
+    metadata:
+      labels:
+        {{- include "transip-ddns.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: node
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeMode.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # A record per node means every node, including tainted control-plane and
+      # storage-excluded ones. Override nodeMode.tolerations to narrow it.
+      tolerations:
+        {{- toYaml .Values.nodeMode.tolerations | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            # The script refuses to start in node mode without this.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: SCRIPT_ARGS
+              value: {{ printf "--node-mode %s" .Values.nodeMode.scriptArgs | quote }}
+            # docker-entrypoint.sh loops on this instead of a CronJob schedule,
+            # because a DaemonSet pod is long-lived.
+            - name: SCHEDULE_INTERVAL
+              value: {{ .Values.nodeMode.interval | quote }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.nodeMode.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: key
+              mountPath: /keys
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "transip-ddns.fullname" . }}-node
+        - name: key
+          secret:
+            secretName: {{ .Values.transip.privateKey.existingSecret | default (printf "%s-key" (include "transip-ddns.fullname" .)) }}
+            items:
+              - key: transip.key
+                path: transip.key
+{{- end }}
