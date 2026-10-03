@@ -97,3 +97,41 @@ podSecurityContext: {}
 securityContext: {}
 #  runAsNonRoot: true
 #  runAsUser: 1000
+
+# Per-node AAAA records.
+#
+# A records are one shared WAN address, so the CronJob above can publish them
+# from anywhere. AAAA cannot: the address comes from asking an external service
+# what source address the connection came from, which returns the *host's* own
+# address — and from the pod network there is no IPv6 route at all.
+#
+# Enabling this deploys a DaemonSet with hostNetwork alongside the CronJob. Each
+# pod writes only the records its own node owns: $NODE_NAME from the downward
+# API, plus any nodeAliases entries for it.
+#
+# Remove AAAA from config.recordTypes when enabling this, or rendering fails —
+# two writers for the same name would fight.
+nodeMode:
+  enabled: false
+  # The DaemonSet owns these; config.recordTypes stays with the CronJob.
+  recordTypes:
+    - AAAA
+  # Extra record names a node owns beyond its own name, e.g. raspi5 also
+  # answers for backup.vanhaarst.net.
+  nodeAliases: {}
+  #  raspi5:
+  #    - backup
+  # Seconds between runs. docker-entrypoint.sh loops on SCHEDULE_INTERVAL,
+  # since a DaemonSet pod is long-lived rather than scheduled.
+  interval: 900
+  scriptArgs: "-s"
+  nodeSelector: {}
+  # Every node needs its own record, including tainted ones.
+  tolerations:
+    - operator: Exists
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 96Mi

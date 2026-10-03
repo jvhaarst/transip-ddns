@@ -1,0 +1,57 @@
+{{- if .Values.nodeMode.enabled }}
+{{- if has "AAAA" .Values.config.recordTypes }}
+{{- fail "nodeMode.enabled=true and config.recordTypes contains AAAA: the DaemonSet owns AAAA records, so remove AAAA from config.recordTypes or two writers will fight over the same names" }}
+{{- end }}
+{{- if not .Values.config.ipLookupProviders.ipv6 }}
+{{- fail "nodeMode.enabled=true but config.ipLookupProviders.ipv6 is empty: node mode discovers the node's address from an IPv6 lookup, so it needs at least one provider" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "transip-ddns.fullname" . }}-node
+  labels:
+    {{- include "transip-ddns.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node
+data:
+  config.yaml: |
+    accountname: {{ .Values.transip.accountName | quote }}
+    privatekeypath: /keys/transip.key
+    {{- if .Values.config.logfile }}
+    logfile: {{ .Values.config.logfile | quote }}
+    {{- end }}
+    iplookupproviders:
+      {{- if .Values.config.ipLookupProviders.ipv4 }}
+      - ipv4:
+        {{- range .Values.config.ipLookupProviders.ipv4 }}
+          - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      - ipv6:
+        {{- range .Values.config.ipLookupProviders.ipv6 }}
+          - {{ . | quote }}
+        {{- end }}
+    domains:
+      {{- range .Values.config.domains }}
+      - {{ . | quote }}
+      {{- end }}
+    # subdomains is ignored in --node-mode: the script replaces it with the
+    # records this node owns, from $NODE_NAME plus its nodealiases entries.
+    # It stays here because load_config reads it unconditionally.
+    subdomains:
+      {{- range .Values.config.subdomains }}
+      - {{ . | quote }}
+      {{- end }}
+    recordtypes:
+      {{- range .Values.nodeMode.recordTypes }}
+      - {{ . }}
+      {{- end }}
+    {{- with .Values.nodeMode.nodeAliases }}
+    nodealiases:
+      {{- range $node, $aliases := . }}
+      {{ $node | quote }}:
+        {{- range $aliases }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+{{- end }}
