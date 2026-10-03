@@ -486,8 +486,26 @@ TIPCTL_CONFIG_FILE=""
 #   Command output with deprecation warnings removed
 #######################################
 run_tipctl() {
-    # Run tipctl with explicit config file and filter out PHP deprecation warnings and empty lines
-    tipctl --configFile="$TIPCTL_CONFIG_FILE" "$@" 2>&1 | grep -v "^Deprecated:" | grep -v "^PHP Deprecated:" | grep -v "^[[:space:]]*$"
+    # Run tipctl with explicit config file and filter out PHP deprecation
+    # warnings and empty lines.
+    #
+    # The filtering used to be a pipeline, which made the exit status grep's
+    # instead of tipctl's: grep exits 1 when it matches nothing, so any tipctl
+    # command that succeeds silently was reported as a failure.
+    # domain:dns:adddnsentry is one of those, so creating a record logged
+    # "Failed to create" for a record it had just created. Capture the output
+    # first, then filter, and return what tipctl returned.
+    # "|| status=$?" rather than a bare assignment plus $?, so that a failing
+    # tipctl does not trip "set -e" before the output can be logged.
+    local output status=0
+    output=$(tipctl --configFile="$TIPCTL_CONFIG_FILE" "$@" 2>&1) || status=$?
+
+    printf '%s\n' "$output" \
+        | grep -v "^Deprecated:" \
+        | grep -v "^PHP Deprecated:" \
+        | grep -v "^[[:space:]]*$" || true
+
+    return "$status"
 }
 
 #######################################
