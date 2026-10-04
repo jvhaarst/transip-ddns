@@ -9,7 +9,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  # Read-only: the workflow no longer commits anything.
+  contents: read
   pages: write
   id-token: write
 
@@ -26,14 +27,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure Git
-        run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
       - name: Install Helm
         uses: azure/setup-helm@v5
@@ -48,43 +41,27 @@ jobs:
           curl -fsSL https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/index.yaml -o existing-index.yaml
           echo "exists=true" >> $GITHUB_OUTPUT
 
-      - name: Auto-bump chart version if needed
-        run: |
-          CHART_FILE="charts/transip-ddns/Chart.yaml"
-          CURRENT_VERSION=$(yq '.version' "$CHART_FILE")
-          echo "Current chart version: $CURRENT_VERSION"
-
-          if [ -f existing-index.yaml ]; then
-            # Check if this version already exists in the index
-            EXISTING_VERSIONS=$(yq '.entries.transip-ddns[].version' existing-index.yaml 2>/dev/null || echo "")
-            if echo "$EXISTING_VERSIONS" | grep -q "^${CURRENT_VERSION}$"; then
-              echo "Version $CURRENT_VERSION already exists in index, bumping patch version..."
-
-              # Parse version and bump patch
-              MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
-              MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
-              PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
-              NEW_PATCH=$((PATCH + 1))
-              NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-
-              echo "Bumping version to: $NEW_VERSION"
-              yq -i ".version = \"$NEW_VERSION\"" "$CHART_FILE"
-
-              # Commit the version bump
-              git add "$CHART_FILE"
-              git commit -m "chore: bump chart version to $NEW_VERSION [skip ci]"
-              git push
-            else
-              echo "Version $CURRENT_VERSION is new, no bump needed"
-            fi
-          else
-            echo "No existing index found, this is the first release"
-          fi
-
+      # The published version is the chart's major.minor with the workflow run
+      # number as the patch digit, which is what ntp_dashboard_k8s and
+      # garmin_health_data_k8s already do. It means no step has to commit to
+      # the default branch: the earlier auto-bump did, and with the
+      # `main protection` ruleset in place that push is rejected with GH013,
+      # because the ruleset bypasses the repository-admin role and not the
+      # GitHub Actions app. It also raced with Renovate automerges, which
+      # rejected it as non-fast-forward.
+      #
+      # Requiring a hand-written bump was the other candidate, but a Renovate
+      # PR that updates an image tag in the chart's values.yaml automerges and
+      # triggers this workflow without bumping anything, so each one would
+      # leave a red release run on main.
       - name: Package Helm chart
         run: |
+          set -euo pipefail
           mkdir -p .helm-release
-          helm package charts/transip-ddns -d .helm-release
+          BASE_VERSION=$(yq '.version' charts/transip-ddns/Chart.yaml)
+          NEW_VERSION="${BASE_VERSION%.*}.${{ github.run_number }}"
+          echo "Publishing chart version ${NEW_VERSION} (Chart.yaml says ${BASE_VERSION})"
+          helm package charts/transip-ddns -d .helm-release --version "${NEW_VERSION}"
 
       - name: Generate Helm repo index
         run: |
