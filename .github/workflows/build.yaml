@@ -4,26 +4,117 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
+    # Only the files that end up inside the image cut a release. A commit
+    # touching the chart, the README or this workflow must not publish a new
+    # version. `pull_request` below stays unfiltered, because `build` is the
+    # required status check in the `main protection` ruleset and has to report
+    # on every pull request.
+    paths:
+      - 'Dockerfile'
+      - 'transip-ddns.sh'
+      - 'docker-entrypoint.sh'
+      - '.dockerignore'
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Which version component to increment'
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# Two Renovate automerges landing together would otherwise read the same
+# newest tag, compute the same version and race on the GHCR tag. Keyed on the
+# ref so pull request builds still run in parallel, and never cancelling, so
+# the required check always reports.
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # `write` to create the release tag and the GitHub release. The `main
+      # protection` ruleset targets branches, so pushing a v* tag is allowed.
+      contents: write
       packages: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # The version comes from the newest v* tag, which a shallow checkout
+          # does not fetch.
+          fetch-depth: 0
+
+      - name: Compute release version
+        if: github.event_name != 'pull_request'
+        id: version
+        env:
+          BUMP: ${{ inputs.bump || 'patch' }}
+        run: |
+          set -euo pipefail
+          LATEST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          if [ -z "${LATEST}" ]; then
+            NEW_VERSION="1.0.0"
+            echo "No v* tag yet, seeding the sequence at ${NEW_VERSION}"
+          else
+            IFS=. read -r MAJOR MINOR PATCH <<<"${LATEST#v}"
+            case "${BUMP}" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+              *) echo "Unknown bump '${BUMP}'" >&2; exit 1 ;;
+            esac
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            echo "Newest tag is ${LATEST}, ${BUMP} bump gives ${NEW_VERSION}"
+          fi
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      # A version already in the registry must never be rebuilt: nodes running
+      # IfNotPresent keep the image they cached, so registry and cluster would
+      # disagree permanently.
+      - name: Refuse to overwrite an existing image version
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -fsS "https://ghcr.io/token?scope=repository:${IMAGE_NAME}:pull&service=ghcr.io" | jq -r '.token')
+          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json' \
+            -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/${IMAGE_NAME}/manifests/${VERSION}")
+          if [ "${STATUS}" = "200" ]; then
+            echo "${REGISTRY}/${IMAGE_NAME}:${VERSION} already exists, refusing to overwrite it" >&2
+            exit 1
+          fi
+          echo "${REGISTRY}/${IMAGE_NAME}:${VERSION} is free (HTTP ${STATUS})"
+
+      # Tagged before the build, not after: a build that fails here leaves a
+      # gap in the sequence, which is harmless, instead of an unclaimed image
+      # version that the next run would republish with different content.
+      - name: Create the release tag
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "v${VERSION}" -m "v${VERSION}"
+          git push origin "v${VERSION}"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -44,11 +135,12 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # The immutable version the chart pins, plus the moving tags that
+          # were already published. No {{major}} or {{major}}.{{minor}}
+          # aliases: nothing consumes them and the chart pins exact.
           tags: |
+            type=raw,value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.version != '' }}
             type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
             type=sha,prefix=
 
       - name: Build and push
@@ -61,3 +153,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Create the GitHub release
+        if: steps.version.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release create "v${VERSION}" --verify-tag --generate-notes
