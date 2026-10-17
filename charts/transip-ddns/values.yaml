@@ -1,9 +1,13 @@
 # TransIP Dynamic DNS Helm Chart Values
 
 # Container image configuration
+#
+# tag is an immutable release version, never a moving tag like `main`. Together
+# with pullPolicy: IfNotPresent that means a node stops contacting ghcr.io once
+# it holds the image. Renovate's helm-values manager raises it per release.
 image:
   repository: ghcr.io/jvhaarst/transip-ddns
-  tag: main
+  tag: "1.0.0"
   pullPolicy: IfNotPresent
 
 # Image pull secrets (if using private registry)

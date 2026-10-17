@@ -121,8 +121,14 @@ recordtypes:
 Multi-arch images (amd64, arm64) are available from GitHub Container Registry:
 
 ```bash
+# An immutable release version — what the Helm chart pins
+docker pull ghcr.io/jvhaarst/transip-ddns:1.0.0
+
+# The tip of the default branch, which moves
 docker pull ghcr.io/jvhaarst/transip-ddns:main
 ```
+
+See [Releases and versioning](#releases-and-versioning) for how a version is cut.
 
 ### Building the Image Locally
 
@@ -234,7 +240,7 @@ Create a `my-values.yaml`:
 ```yaml
 image:
   repository: ghcr.io/jvhaarst/transip-ddns
-  tag: main
+  tag: "1.0.0"
 
 schedule: "*/5 * * * *"
 
@@ -265,8 +271,9 @@ helm install transip-ddns ./charts/transip-ddns -f my-values.yaml
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `image.repository` | Container image repository | `transip-ddns` |
-| `image.tag` | Container image tag | `latest` |
+| `image.repository` | Container image repository | `ghcr.io/jvhaarst/transip-ddns` |
+| `image.tag` | Container image tag, an immutable release version | `1.0.0` |
+| `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `schedule` | Cron schedule | `*/5 * * * *` |
 | `transip.accountName` | TransIP account name | `""` |
 | `transip.privateKey.existingSecret` | Existing secret name | `""` |
@@ -327,6 +334,38 @@ Enable and start:
 ```bash
 sudo systemctl enable --now transip-ddns.timer
 ```
+
+## Releases and versioning
+
+Three numbers appear around this project and they are independent of each other:
+
+| Number | What it is | Who moves it |
+|--------|------------|--------------|
+| Image version, e.g. `1.0.0` | The container image, tagged `v1.0.0` in git with a matching GitHub release | `build.yaml`, on each image-affecting push to `main` |
+| Chart version, e.g. `0.4.7` | The packaged Helm chart. `Chart.yaml` holds the major and minor; the patch digit is the publishing workflow's run number | `helm-release.yaml` |
+| `appVersion`, e.g. `6.34.10` | The [tipctl](https://github.com/transip/tipctl) release inside the image | Renovate |
+
+### How a version is cut
+
+A push to `main` that changes `Dockerfile`, `transip-ddns.sh`, `docker-entrypoint.sh` or
+`.dockerignore` runs `build.yaml`, which takes the newest `v*` tag, adds one to the patch
+digit, creates the tag and a GitHub release, and publishes the image under that version
+alongside the moving `main` and commit-sha tags. A push that touches only the chart, the
+README or the workflows publishes nothing.
+
+Renovate then opens a pull request raising `image.tag` in
+`charts/transip-ddns/values.yaml`, which automerges behind the `build` check and, because it
+touches `charts/`, triggers the chart release.
+
+The image version is never reused. The tag is created before the build, so a build that
+fails leaves a gap in the sequence rather than an image version that a later run could
+republish with different content — which would be invisible to nodes already holding the
+old image under `IfNotPresent`.
+
+### Cutting a major or a minor
+
+Every automatic release is a patch. For anything larger, run **Build and Push Container**
+from the Actions tab with the `bump` input set to `minor` or `major`.
 
 ## License
 
