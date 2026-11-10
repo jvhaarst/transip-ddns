@@ -7,7 +7,7 @@
 # it holds the image. Renovate's helm-values manager raises it per release.
 image:
   repository: ghcr.io/jvhaarst/transip-ddns
-  tag: "1.0.4@sha256:a6564437d2336756b96a5438e1db1bedfba6f72a0e5502a1afdb109b9f6517b0"
+  tag: "1.0.5@sha256:f34046dcaf3cb98bc534fe268cf2d5599022f7eea73e735aada1a34aab0a0e94"
   pullPolicy: IfNotPresent
 
 # Image pull secrets (if using private registry)
