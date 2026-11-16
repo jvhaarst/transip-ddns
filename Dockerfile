@@ -24,7 +24,7 @@ RUN apk upgrade --no-cache brotli-libs
 
 # Install tipctl globally via composer (with cache adapter dependency)
 # renovate: datasource=packagist depName=transip/tipctl
-ARG TIPCTL_VERSION=6.34.10
+ARG TIPCTL_VERSION=6.35.0
 RUN composer global require transip/tipctl:${TIPCTL_VERSION} symfony/cache --no-interaction --no-progress \
     && ln -s /root/.composer/vendor/bin/tipctl /usr/local/bin/tipctl
 
