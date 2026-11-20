@@ -1,4 +1,4 @@
-FROM php:8.5-cli-alpine@sha256:1ff5b45922ab30f418447c6089dbe2eba5f01e0b2742863d0327ac349305d70f
+FROM php:8.5-cli-alpine@sha256:b3ef44e3c43f8fc0d0deca8ae318f4e4a9b8eb1809617b66e09c915fcaad04c8
 
 LABEL maintainer="TransIP DDNS" \
       description="Dynamic DNS updater for TransIP using tipctl"
